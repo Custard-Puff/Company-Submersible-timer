@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>FF14 潛水艇回航追蹤器</title>
+    <style>
+        body { font-family: sans-serif; background: #2c3e50; color: #ecf0f1; padding: 20px; }
+        .sub-container { display: flex; flex-wrap: wrap; gap: 20px; }
+        .sub-card { background: #34495e; padding: 15px; border-radius: 8px; width: 250px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        h3 { margin-top: 0; color: #f1c40f; }
+        input { width: 50px; padding: 5px; margin: 5px 0; border-radius: 4px; border: none; }
+        button { background: #27ae60; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #2ecc71; }
+        .return-time { font-size: 0.9em; color: #bdc3c7; margin-top: 10px; }
+        .countdown { font-size: 1.2em; font-weight: bold; color: #e74c3c; margin: 10px 0; }
+    </style>
+</head>
+<body>
+
+    <h1>FF14 潛水艇回航追蹤</h1>
+    <p>請輸入剩餘回航時間，系統將自動計算回航點並倒數。</p>
+    <button onclick="requestNotification()">啟用瀏覽器通知</button>
+    <hr>
+
+    <div class="sub-container" id="subContainer">
+        </div>
+
+    <script>
+        const subCount = 4;
+        const subContainer = document.getElementById('subContainer');
+        let subs = JSON.parse(localStorage.getItem('ff14_subs')) || {};
+
+        // 初始化介面
+        for (let i = 1; i <= subCount; i++) {
+            subContainer.innerHTML += `
+                <div class="sub-card">
+                    <h3>潛艇 #${i}</h3>
+                    <label>剩餘：</label>
+                    <input type="number" id="h${i}" placeholder="時" min="0"> 小時 
+                    <input type="number" id="m${i}" placeholder="分" min="0" max="59"> 分
+                    <br>
+                    <button onclick="startTimer(${i})">開始追蹤</button>
+                    <div class="return-time" id="return${i}">預計回來：--:--:--</div>
+                    <div class="countdown" id="count${i}">剩餘 --:--:--</div>
+                </div>
+            `;
+        }
+
+        // 請求通知權限
+        function requestNotification() {
+			if (!("Notification" in window)) {
+			alert("這台瀏覽器不支援桌面通知。");
+			} else if (Notification.permission === "granted") {
+			alert("通知權限已經開啟囉！");
+			} else {
+			Notification.requestPermission().then(permission => {
+				if (permission === "granted") {
+                new Notification("通知功能啟動！", { body: "當潛艇回航時我會提醒你。" });
+				} else {
+                alert("通知權限被拒絕了，請檢查瀏覽器設定。");
+					}
+				});
+			}
+		}
+
+        // 開始計時
+        function startTimer(id) {
+            const h = parseInt(document.getElementById(`h${id}`).value) || 0;
+            const m = parseInt(document.getElementById(`m${id}`).value) || 0;
+            
+            if (h === 0 && m === 0) return;
+
+            const now = new Date();
+            const targetTime = now.getTime() + (h * 60 * 60 * 1000) + (m * 60 * 1000);
+            
+            subs[id] = {
+                target: targetTime,
+                notified: false
+            };
+            
+            localStorage.setItem('ff14_subs', JSON.stringify(subs));
+            updateUI();
+        }
+
+        function updateUI() {
+            const now = new Date().getTime();
+
+            for (let i = 1; i <= subCount; i++) {
+                if (subs[i]) {
+                    const diff = subs[i].target - now;
+                    const targetDate = new Date(subs[i].target);
+                    
+                    document.getElementById(`return${i}`).innerText = `預計回來：${targetDate.toLocaleString()}`;
+
+                    if (diff > 0) {
+                        const hours = Math.floor(diff / (1000 * 60 * 60));
+                        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                        const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+                        document.getElementById(`count${i}`).innerText = `${hours}時 ${minutes}分 ${seconds}秒`;
+                        document.getElementById(`count${i}`).style.color = "#e74c3c";
+                    } else {
+                        document.getElementById(`count${i}`).innerText = "已回航！";
+                        document.getElementById(`count${i}`).style.color = "#2ecc71";
+                        
+                        // 發送通知
+                        if (!subs[i].notified) {
+                            sendNotification(i);
+                            subs[i].notified = true;
+                            localStorage.setItem('ff14_subs', JSON.stringify(subs));
+                        }
+                    }
+                }
+            }
+        }
+
+        function sendNotification(id) {
+            if (Notification.permission === "granted") {
+                new Notification(`FF14 潛艇回報`, {
+                    body: `第 ${id} 艘潛水艇已經回到岸邊囉！`,
+                    icon: "https://www.finalfantasyxiv.com/favicon.ico"
+                });
+            }
+        }
+
+        // 每秒更新
+        setInterval(updateUI, 1000);
+        updateUI(); // 初始執行一次
+    </script>
+</body>
+</html>
