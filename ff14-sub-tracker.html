@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FF14 潛水艇追蹤器</title>
+    <style>
+        body { font-family: "Microsoft JhengHei", sans-serif; background: #2c3e50; color: #ecf0f1; padding: 20px; }
+        
+        /* 這裡改成 justify-content: flex-start 讓它靠左對齊 */
+        .sub-container { 
+            display: flex; 
+            flex-wrap: wrap; 
+            gap: 20px; 
+            margin-top: 20px; 
+            justify-content: flex-start; 
+        }
+
+        .sub-card { background: #34495e; padding: 20px; border-radius: 12px; width: 280px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); border: 1px solid #455a64; }
+        
+        /* 手機版排版調整：保持垂直堆疊與置中 */
+        @media screen and (max-width: 600px) {
+            body { padding: 10px; }
+            .sub-card { width: 90%; margin: 0 auto; } 
+            .sub-container { flex-direction: column; align-items: center; }
+        }
+
+        .sub-title-input {
+            background: transparent;
+            border: none;
+            border-bottom: 1px solid transparent;
+            color: #f1c40f;
+            font-size: 1.2em;
+            font-weight: bold;
+            width: 100%;
+            cursor: pointer;
+            padding-bottom: 5px;
+            margin-bottom: 10px;
+        }
+        .sub-title-input:hover, .sub-title-input:focus {
+            border-bottom: 1px solid #f1c40f;
+            outline: none;
+        }
+
+        .input-group { margin: 10px 0; display: flex; align-items: center; gap: 5px; }
+        input[type="number"] { width: 50px; padding: 8px; border-radius: 4px; border: none; text-align: center; }
+        button { background: #27ae60; color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer; width: 100%; margin-top: 10px; font-size: 1em; }
+        .btn-notify { background: #2980b9; width: auto; margin-bottom: 10px; }
+        .countdown { font-size: 1.2em; font-weight: bold; color: #e74c3c; margin: 15px 0; }
+        .return-time { font-size: 0.8em; color: #bdc3c7; }
+    </style>
+</head>
+<body>
+
+    <h1>FF14 潛水艇回航追蹤</h1>
+    <button class="btn-notify" onclick="requestNotification()">🔔 啟用桌面通知</button>
+    <div class="sub-container" id="subContainer"></div>
+
+    <script>
+        const subCount = 4;
+        const subContainer = document.getElementById('subContainer');
+        let subs = JSON.parse(localStorage.getItem('ff14_subs')) || {};
+
+        for (let i = 1; i <= subCount; i++) {
+            const name = subs[i] ? (subs[i].name || `潛艇 #${i}`) : `潛艇 #${i}`;
+            subContainer.innerHTML += `
+                <div class="sub-card">
+                    <input type="text" class="sub-title-input" id="name${i}" value="${name}" onblur="saveName(${i})" placeholder="點擊修改名稱">
+                    <div class="input-group">
+                        <input type="number" id="d${i}" placeholder="天" min="0" value="0">天
+                        <input type="number" id="h${i}" placeholder="時" min="0" max="23" value="0">時
+                        <input type="number" id="m${i}" placeholder="分" min="0" max="59" value="0">分
+                    </div>
+                    <button onclick="startTimer(${i})">開始追蹤</button>
+                    <div class="countdown" id="count${i}">等待設定</div>
+                    <div class="return-time" id="return${i}">預計回來：--</div>
+                </div>
+            `;
+        }
+
+        function saveName(id) {
+            const newName = document.getElementById(`name${id}`).value;
+            if (!subs[id]) subs[id] = {};
+            subs[id].name = newName;
+            localStorage.setItem('ff14_subs', JSON.stringify(subs));
+        }
+
+        function requestNotification() {
+			if (!("Notification" in window)) {
+				alert("這台瀏覽器不支援桌面通知。");
+			} else if (Notification.permission === "granted") {
+				alert("通知權限已經開啟囉！");
+			} else {
+				Notification.requestPermission().then(permission => {
+					if (permission === "granted") {
+						new Notification("通知功能啟動！", { body: "當潛艇回航時我會提醒你。" });
+					} else {
+						alert("通知權限被拒絕了，請檢查瀏覽器設定。");
+					}
+				});
+			}
+		}
+
+        function startTimer(id) {
+            const d = parseInt(document.getElementById(`d${id}`).value) || 0;
+            const h = parseInt(document.getElementById(`h${id}`).value) || 0;
+            const m = parseInt(document.getElementById(`m${id}`).value) || 0;
+            
+            const totalMs = ((d * 24 * 60 * 60) + (h * 60 * 60) + (m * 60)) * 1000;
+            const targetTime = new Date().getTime() + totalMs;
+            
+            if (!subs[id]) subs[id] = {};
+            subs[id].target = targetTime;
+            subs[id].notified = false;
+            
+            localStorage.setItem('ff14_subs', JSON.stringify(subs));
+            updateUI();
+        }
+
+        function updateUI() {
+            const now = new Date().getTime();
+            for (let i = 1; i <= subCount; i++) {
+                if (subs[i] && subs[i].target) {
+                    const diff = subs[i].target - now;
+                    if (diff > 0) {
+                        const d = Math.floor(diff / (1000 * 60 * 60 * 24));
+                        const h = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                        const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                        const s = Math.floor((diff % (1000 * 60)) / 1000);
+                        document.getElementById(`count${i}`).innerText = `${d}天 ${h}時 ${m}分 ${s}秒`;
+                        document.getElementById(`return${i}`).innerText = `預計回來：${new Date(subs[i].target).toLocaleString()}`;
+                    } else {
+                        document.getElementById(`count${i}`).innerText = "✅ 已回航";
+                        if (!subs[i].notified) {
+                            if (Notification.permission === "granted") {
+                                new Notification("FF14 回航通知", { body: `${subs[i].name} 回來了！` });
+                            }
+                            subs[i].notified = true;
+                            localStorage.setItem('ff14_subs', JSON.stringify(subs));
+                        }
+                    }
+                }
+            }
+        }
+        setInterval(updateUI, 1000);
+        updateUI();
+    </script>
+</body>
+</html>
