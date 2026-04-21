@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FF14 潛水艇追蹤器 - 專業管理版</title>
+    <style>
+        body { font-family: "Microsoft JhengHei", sans-serif; background: #2c3e50; color: #ecf0f1; padding: 20px; line-height: 1.6; }
+        
+        .header-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
+        
+        .sub-container { 
+            display: flex; 
+            flex-wrap: wrap; 
+            gap: 20px; 
+            justify-content: flex-start; 
+        }
+
+        .sub-card { 
+            background: #34495e; padding: 20px; border-radius: 12px; width: 280px; 
+            box-shadow: 0 8px 16px rgba(0,0,0,0.4); border: 1px solid #455a64; 
+            position: relative; transition: transform 0.2s; 
+        }
+        .sub-card:hover { transform: translateY(-5px); }
+        
+        @media screen and (max-width: 600px) {
+            .sub-card { width: 100%; max-width: 320px; margin: 0 auto; } 
+            .sub-container { flex-direction: column; align-items: center; }
+        }
+
+        /* 刪除按鈕 */
+        .btn-delete {
+            position: absolute; top: 10px; right: 10px;
+            background: #c0392b; color: white; border: none;
+            width: 24px; height: 24px; border-radius: 50%;
+            cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center;
+        }
+        .btn-delete:hover { background: #e74c3c; }
+
+        .sub-title-input { background: transparent; border: none; border-bottom: 2px solid transparent; color: #f1c40f; font-size: 1.2em; font-weight: bold; width: 85%; cursor: pointer; margin-bottom: 15px; text-align: left; }
+        .sub-title-input:focus { border-bottom: 2px solid #f1c40f; outline: none; }
+        
+        .input-group { margin: 10px 0; display: flex; align-items: center; justify-content: center; gap: 8px; }
+        input[type="number"] { width: 55px; padding: 8px; border-radius: 6px; border: none; text-align: center; font-size: 1em; }
+        
+        .btn-group { display: flex; gap: 10px; margin-top: 15px; }
+        button { background: #27ae60; color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer; font-size: 1em; font-weight: bold; }
+        .btn-reset { background: #95a5a6; flex: 1; }
+        .btn-start { flex: 2; }
+        
+        .btn-main { background: #2980b9; padding: 10px 20px; }
+        .btn-add { background: #8e44ad; }
+
+        .countdown { font-size: 1.3em; font-weight: bold; color: #e74c3c; margin: 15px 0; text-align: center; min-height: 1.5em; }
+        .return-time { font-size: 0.85em; color: #bdc3c7; text-align: center; }
+        .fixed-tag { position: absolute; top: 10px; right: 10px; font-size: 0.7em; color: #7f8c8d; }
+    </style>
+</head>
+<body>
+
+    <h1>🚢 FF14 潛水艇回航追蹤</h1>
+    
+    <div class="header-actions">
+        <button class="btn-main" onclick="requestNotification()">🔔 啟用桌面通知</button>
+        <button class="btn-main btn-add" onclick="addSub()">➕ 新增額外潛艇</button>
+    </div>
+
+    <div class="sub-container" id="subContainer"></div>
+
+    <script>
+        // 初始化資料：如果 localStorage 為空，預設給 4 艘不可刪除的
+        const STORAGE_KEY = 'ff14_pro_subs';
+        let subs = JSON.parse(localStorage.getItem(STORAGE_KEY));
+
+        if (!subs || subs.length === 0) {
+            subs = [];
+            for (let i = 1; i <= 4; i++) {
+                subs.push({
+                    id: i, // 固定 ID 1-4
+                    name: `潛艇 #${i}`,
+                    target: null,
+                    notified: false,
+                    isFixed: true // 標記為不可刪除
+                });
+            }
+            save();
+        }
+
+        // 渲染畫面
+        function render() {
+            const container = document.getElementById('subContainer');
+            container.innerHTML = '';
+            
+            subs.forEach((sub) => {
+                const card = document.createElement('div');
+                card.className = 'sub-card';
+                
+                // 只有非固定潛艇才顯示刪除按鈕
+                const deleteBtn = sub.isFixed 
+                    ? `<span class="fixed-tag">固定</span>` 
+                    : `<button class="btn-delete" onclick="deleteSub(${sub.id})">×</button>`;
+
+                card.innerHTML = `
+                    ${deleteBtn}
+                    <input type="text" class="sub-title-input" value="${sub.name}" 
+                        onblur="updateName(${sub.id}, this.value)" placeholder="輸入名稱...">
+                    <div class="input-group">
+                        <input type="number" id="d${sub.id}" placeholder="0" min="0">天
+                        <input type="number" id="h${sub.id}" placeholder="0" min="0" max="23">時
+                        <input type="number" id="m${sub.id}" placeholder="0" min="0" max="59">分
+                    </div>
+                    <div class="btn-group">
+                        <button class="btn-start" onclick="startTimer(${sub.id})">開始追蹤</button>
+                        <button class="btn-reset" onclick="resetTimer(${sub.id})">重置</button>
+                    </div>
+                    <div class="countdown" id="count${sub.id}">等待設定</div>
+                    <div class="return-time" id="return${sub.id}">預計回來：--</div>
+                `;
+                container.appendChild(card);
+            });
+            updateUI();
+        }
+
+        // 新增潛艇
+        function addSub() {
+            const newSub = {
+                id: Date.now(),
+                name: `新潛艇 ${subs.length + 1}`,
+                target: null,
+                notified: false,
+                isFixed: false // 手動新增的可以刪除
+            };
+            subs.push(newSub);
+            save();
+            render();
+        }
+
+        // 刪除潛艇
+        function deleteSub(id) {
+            const sub = subs.find(s => s.id === id);
+            if (sub && sub.isFixed) return; // 安全檢查
+
+            if(confirm('確定要刪除這台額外的潛艇嗎？')) {
+                subs = subs.filter(s => s.id !== id);
+                save();
+                render();
+            }
+        }
+
+        function updateName(id, newName) {
+            const sub = subs.find(s => s.id === id);
+            if (sub) {
+                sub.name = newName;
+                save();
+            }
+        }
+
+        function startTimer(id) {
+            const d = parseInt(document.getElementById(`d${id}`).value) || 0;
+            const h = parseInt(document.getElementById(`h${id}`).value) || 0;
+            const m = parseInt(document.getElementById(`m${id}`).value) || 0;
+            
+            if (d === 0 && h === 0 && m === 0) return;
+
+            const totalMs = ((d * 86400) + (h * 3600) + (m * 60)) * 1000;
+            const targetTime = new Date().getTime() + totalMs;
+            
+            const sub = subs.find(s => s.id === id);
+            if (sub) {
+                sub.target = targetTime;
+                sub.notified = false;
+                save();
+                document.getElementById(`d${id}`).value = "";
+                document.getElementById(`h${id}`).value = "";
+                document.getElementById(`m${id}`).value = "";
+                updateUI();
+            }
+        }
+
+        function resetTimer(id) {
+            const sub = subs.find(s => s.id === id);
+            if (sub) {
+                sub.target = null;
+                sub.notified = false;
+                save();
+                render();
+            }
+        }
+
+        function save() {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(subs));
+        }
+
+		function requestNotification() {
+			if (!("Notification" in window)) {
+				alert("這台瀏覽器不支援桌面通知。");
+			} else {
+				Notification.requestPermission().then(permission => {
+					if (permission === "granted") {
+						// 權限開啟時，發送一個測試通知確認真的收得到
+						new Notification("FF14 潛水艇追蹤器", { 
+							body: "通知功能已啟動！當潛艇回航時會在這裡提醒你。",
+							icon: "https://www.finalfantasyxiv.com/favicon.ico" 
+						});
+					} else {
+						alert("通知權限被拒絕了，請檢查瀏覽器設定。");
+					}
+				});
+			}
+		} 
+
+        function updateUI() {
+            const now = new Date().getTime();
+            subs.forEach(sub => {
+                const countElem = document.getElementById(`count${sub.id}`);
+                const returnElem = document.getElementById(`return${sub.id}`);
+                if (!countElem) return;
+
+                if (sub.target) {
+                    const diff = sub.target - now;
+                    if (diff > 0) {
+                        const d = Math.floor(diff / 86400000);
+                        const h = Math.floor((diff % 86400000) / 3600000);
+                        const m = Math.floor((diff % 3600000) / 60000);
+                        const s = Math.floor((diff % 60000) / 1000);
+                        countElem.innerText = `${d}天 ${h}時 ${m}分 ${s}秒`;
+                        returnElem.innerText = `預計回來：${new Date(sub.target).toLocaleString()}`;
+                    } else {
+                        countElem.innerText = "✅ 已回航";
+                        if (!sub.notified) {
+                            if (Notification.permission === "granted") {
+                                new Notification("FF14 回航通知", { body: `${sub.name} 已抵達港口！` });
+                            }
+                            sub.notified = true;
+                            save();
+                        }
+                    }
+                } else {
+                    countElem.innerText = "等待設定";
+                    returnElem.innerText = "預計回來：--";
+                }
+            });
+			
+			// 動態修改網頁標題
+			document.title = anyReady ? "✅ 已回航！- FF14 追蹤器" : "FF14 潛水艇追蹤器";
+        }
+
+        setInterval(updateUI, 1000);
+        render();
+    </script>
+</body>
+</html>
